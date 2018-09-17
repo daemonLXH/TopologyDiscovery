@@ -1,7 +1,7 @@
 /*
 zabbix工具，提供zabbix连接，查询全部主机的功能
  */
-package main
+package zabbixUtil
 
 import (
 	"net/http"
@@ -13,57 +13,22 @@ import (
 	"net"
 )
 
-const (
-	zabbixAddress = "http://monitor.demolx.com:8080/api_jsonrpc.php"
-	zabbixUser = "admin"
-	zabbixPassword = "LinkedSee@2017"
-)
 
-type userParams struct {
-	User 	string `json:"user"`
-	Password string `json:"password"`
-}
+func (z *ZabbixClient) Connecting(userName string, password string) error {
+	var body LoginParams
+	body.JsonRPC = "2.0"
+	body.Method = "user.login"
+	body.Params.User = userName
+	body.Params.Password = password
+	body.Id = 1
 
-
-type zabbixRequestContent struct {
-	Jsonrpc		string				`json:"jsonrpc"`
-	Method 		string				`json:"method"`
-	Params 		userParams			`json:"params"`
-	Id 			int					`json:"id"`
-}
-
-
-type ZabbixClient struct {
-	url 		string
-	token 		string
-}
-
-type HostInfo struct {
-	HostID string 	`json:"hostid"`
-	Name string `json:"name"`
-}
-
-type HostResult struct {
-	JsonRPC		string 				`json:"jsonrpc"`
-	Id   		int 				`json:"id"`
-	Result 		[]HostInfo 			`json:"result"`
-}
-
-
-func (z *ZabbixClient) connecting(userName string, password string) error {
-	body := zabbixRequestContent{
-		Jsonrpc: "2.0",
-		Method: "user.login",
-		Params: userParams{userName,
-			 password,
-		},
-		Id: 1,
-	}
 	content, err := json.MarshalIndent(body, "", "  ")
 	if err != nil {
 		return err
 	}
-	resp, err := http.Post(z.url, "application/json", bytes.NewReader(content))
+
+	log.Printf("login params: %s ", content)
+	resp, err := http.Post(z.Url, "application/json", bytes.NewReader(content))
 	if err != nil {
 		return err
 	}
@@ -73,7 +38,7 @@ func (z *ZabbixClient) connecting(userName string, password string) error {
 	token := data["result"]
 
 	if value, ok := token.(string); ok{
-		z.token = value
+		z.Token = value
 	} else {
 		return errors.New(fmt.Sprintf("错误信息：%v", data))
 	}
@@ -83,6 +48,41 @@ func (z *ZabbixClient) connecting(userName string, password string) error {
 }
 
 func (z *ZabbixClient) QueryHostIP(hostID string) net.IP {
+	body :=map[string]interface{}{
+		"jsonrpc": "2.0",
+		"method": "hostinterface.get",
+		"auth": z.Token,
+		"id": 1,
+		"params": map[string]interface{}{
+			"output": []string{"ip"},
+			"hostids": hostID,
+		},
+	}
+
+	content, err := json.Marshal(body)
+	if err != nil {
+		return nil
+	}
+
+	resp, err := http.Post(z.Url, "application/json", bytes.NewReader(content))
+	if err != nil {
+		return nil
+	}
+
+	defer resp.Body.Close()
+
+	data := StandResult{}
+	json.NewDecoder(resp.Body).Decode(&data)
+
+	log.Println(data)
+	log.Println(data.Result)
+
+
+
+	if value, ok :=data.Result["ip"].(net.IP); ok {
+		return value
+	}
+	return nil
 
 }
 
@@ -90,7 +90,7 @@ func (z *ZabbixClient) QueryHosts() ([]net.IP, error) {
 	body := map[string]interface{}{
 		"jsonrpc": "2.0",
 		"method": "host.get",
-		"auth": z.token,
+		"auth": z.Token,
 		"id": 1,
 		"params": map[string]interface{}{
 			"output": []string{"hostid", "name"},
@@ -101,7 +101,7 @@ func (z *ZabbixClient) QueryHosts() ([]net.IP, error) {
 		return nil, err
 	}
 
-	resp, err := http.Post(z.url, "application/json", bytes.NewReader(content))
+	resp, err := http.Post(z.Url, "application/json", bytes.NewReader(content))
 	if err != nil {
 		return nil, err
 	}
@@ -121,11 +121,11 @@ func (z *ZabbixClient) QueryHosts() ([]net.IP, error) {
 }
 
 
-func main() {
-	zabbixClient := ZabbixClient{url:zabbixAddress}
-	err := zabbixClient.connecting(zabbixUser, zabbixPassword)
-	if err != nil {
-		log.Fatalln(err)
-	}
-	zabbixClient.QueryHosts()
-}
+//func main() {
+//	zabbixClient := ZabbixClient{url:zabbixAddress}
+//	err := zabbixClient.connecting(zabbixUser, zabbixPassword)
+//	if err != nil {
+//		log.Fatalln(err)
+//	}
+//	zabbixClient.QueryHosts()
+//}
