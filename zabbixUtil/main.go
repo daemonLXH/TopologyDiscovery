@@ -8,13 +8,12 @@ import (
 	"encoding/json"
 	"log"
 	"bytes"
-	"github.com/pkg/errors"
-	"fmt"
 	"net"
 )
 
-
+// 登录并获取token
 func (z *ZabbixClient) Connecting(userName string, password string) error {
+	// 这里有没有更好的写法？有点繁琐
 	var body LoginParams
 	body.JsonRPC = "2.0"
 	body.Method = "user.login"
@@ -33,30 +32,35 @@ func (z *ZabbixClient) Connecting(userName string, password string) error {
 		return err
 	}
 	defer resp.Body.Close()
-	data := map[string]interface{}{}
-	json.NewDecoder(resp.Body).Decode(&data)
-	token := data["result"]
 
-	if value, ok := token.(string); ok{
-		z.Token = value
-	} else {
-		return errors.New(fmt.Sprintf("错误信息：%v", data))
+	data := TokenResponse{}
+	err = json.NewDecoder(resp.Body).Decode(&data)
+	if err != nil {
+		return err
 	}
-
-	log.Println("zabbix 登录成功.")
+	z.Token = data.Result
+	log.Printf("zabbix 登录成功，token: %s", z.Token)
 	return nil
 }
 
+// 初始化一些不变的参数
+func (z *ZabbixClient) CreateBaseParams() QueryRequestParams {
+	var params = QueryRequestParams{}
+	params.JsonRPC = "2.0"
+	params.Id = 1
+	params.Auth = z.Token
+
+	return params
+}
+
+// 以主机ID查询IP
 func (z *ZabbixClient) QueryHostIP(hostID string) net.IP {
-	body :=map[string]interface{}{
-		"jsonrpc": "2.0",
-		"method": "hostinterface.get",
-		"auth": z.Token,
-		"id": 1,
-		"params": map[string]interface{}{
-			"output": []string{"ip"},
-			"hostids": hostID,
-		},
+	body := z.CreateBaseParams()
+	body.Method = "hostinterface.get"
+	body.Auth = z.Token
+	body.Params = map[string]interface{}{
+		"output": []string{"ip"},
+		"hostids": hostID,
 	}
 
 	content, err := json.Marshal(body)
@@ -71,31 +75,19 @@ func (z *ZabbixClient) QueryHostIP(hostID string) net.IP {
 
 	defer resp.Body.Close()
 
-	data := StandResult{}
+	data := IpResponse{}
 	json.NewDecoder(resp.Body).Decode(&data)
-
-	log.Println(data)
-	log.Println(data.Result)
-
-
-
-	if value, ok :=data.Result["ip"].(net.IP); ok {
-		return value
-	}
-	return nil
-
+	return data.Result[0].Ip
 }
 
+// 查询全部主机
 func (z *ZabbixClient) QueryHosts() ([]net.IP, error) {
-	body := map[string]interface{}{
-		"jsonrpc": "2.0",
-		"method": "host.get",
-		"auth": z.Token,
-		"id": 1,
-		"params": map[string]interface{}{
-			"output": []string{"hostid", "name"},
-		},
+	body := z.CreateBaseParams()
+	body.Method = "host.get"
+	body.Params = map[string]interface{}{
+		"output": []string{"hostid", "name"},
 	}
+
 	content, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
@@ -108,7 +100,7 @@ func (z *ZabbixClient) QueryHosts() ([]net.IP, error) {
 
 	defer resp.Body.Close()
 
-	data := HostResult{}
+	data := HostResponse{}
 	json.NewDecoder(resp.Body).Decode(&data)
 
 	result :=[]net.IP{}
@@ -119,13 +111,3 @@ func (z *ZabbixClient) QueryHosts() ([]net.IP, error) {
 
 	return result, nil
 }
-
-
-//func main() {
-//	zabbixClient := ZabbixClient{url:zabbixAddress}
-//	err := zabbixClient.connecting(zabbixUser, zabbixPassword)
-//	if err != nil {
-//		log.Fatalln(err)
-//	}
-//	zabbixClient.QueryHosts()
-//}
